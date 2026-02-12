@@ -3,14 +3,12 @@ import Foundation
 struct User: Identifiable, Codable {
     let id: UInt
     let email: String
-    let name: String?
-    let position: String?
-    let imageURL: String?
+    var name: String?        // <--- var شود
+    var position: String?    // <--- var شود
+    var imageURL: String?    // <--- var شود (بسیار مهم)
     let createdAt: Date?
     let password: String?
     let biometricEnabled: Bool?
-    
-    // فیلدهای جدید
     let lastStatus: String?
     let lastStatusAt: Date?
     

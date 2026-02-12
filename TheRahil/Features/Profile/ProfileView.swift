@@ -21,40 +21,22 @@ struct ProfileView: View {
     @State private var tempEmail = ""
     @State private var tempPassword = ""
     
-    @State private var isLoading = true
+    @State private var isLoading = false
     @State private var selectedImageData: Data? = nil
+    
+    // --- حذف currentImageURL و uiImage ---
+    // مستقیماً از auth.user?.imageURL استفاده میکنیم
 
     var body: some View {
         ZStack {
             List {
                 Section {
                     VStack(spacing: 0) {
+                        // نمایش عکس مستقیم از URL داخل auth.user
                         ZStack {
-                            if let urlString = auth.user?.imageURL, let url = URL(string: urlString) {
-                                AsyncImage(url: url) { phase in
-                                    switch phase {
-                                    case .empty:
-                                        ProgressView()
-                                    case .success(let image):
-                                        image.resizable()
-                                            .scaledToFill()
-                                    case .failure:
-                                        Image(systemName: "person.crop.circle.fill")
-                                            .foregroundColor(.gray)
-                                    @unknown default:
-                                        EmptyView()
-                                    }
-                                }
+                            ProfileImageView(imageURL: auth.user?.imageURL)
                                 .frame(width: 100, height: 100)
-                                .clipShape(Circle())
-                            } else {
-                                Image(systemName: "person.crop.circle.fill")
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: 100, height: 100)
-                                    .foregroundColor(.gray)
-                                    .clipShape(Circle())
-                            }
+                            
                             Button(action: { isImagePickerPresented.toggle() }) {
                                 Image(systemName: "camera.fill")
                                     .foregroundColor(.white)
@@ -144,23 +126,17 @@ struct ProfileView: View {
             .listStyle(.insetGrouped)
             .navigationTitle("Profile")
             .disabled(isLoading)
+            .refreshable {
+                await refreshProfile()
+            }
             
             if isLoading {
                 LoadingOverlayView()
             }
         }
         .onAppear {
-            if auth.token != nil {
-                Task {
-                    isLoading = true
-                    await auth.fetchProfile(token: auth.token!)
-                    
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)
-                    
-                    isLoading = false
-                }
-            } else {
-                isLoading = false
+            Task {
+                await refreshProfile()
             }
         }
         .sheet(isPresented: $isImagePickerPresented) {
@@ -169,15 +145,7 @@ struct ProfileView: View {
         .onChange(of: selectedImageData) { newData in
             if let data = newData {
                 Task {
-                    do {
-                        guard let currentToken = auth.token else {
-                            return
-                        }
-                        let _ = try await APIClient.shared.uploadProfileImage(imageData: data, token: currentToken)
-                        await auth.fetchProfile(token: currentToken)
-                    } catch {
-                        print("Image upload failed: \(error)")
-                    }
+                    await uploadProfileImage(data)
                 }
             }
         }
@@ -230,6 +198,36 @@ struct ProfileView: View {
         }
     }
     
+    private func refreshProfile() async {
+        guard let token = auth.token else { return }
+        await auth.fetchProfile(token: token)
+    }
+    
+    private func uploadProfileImage(_ data: Data) async {
+        isLoading = true
+        defer { isLoading = false }
+        
+        do {
+            guard let token = auth.token else { return }
+            
+            print("🚀 Starting upload...")
+            let returnedURL = try await APIClient.shared.uploadProfileImage(imageData: data, token: token)
+            print("✅ Upload Success. Server returned URL: \(returnedURL)")
+            
+            // آپدیت مستقیم user object
+            if var currentUser = auth.user {
+                currentUser.imageURL = returnedURL
+                auth.user = currentUser
+            }
+            
+            // دریافت مجدد پروفایل برای اطمینان
+            await refreshProfile()
+            
+        } catch {
+            print("❌ Error uploading image: \(error)")
+        }
+    }
+    
     func updateProfileField(field: String, newValue: String) {
         Task {
             do {
@@ -240,10 +238,11 @@ struct ProfileView: View {
                     password: field == "Password" ? newValue : nil,
                     token: auth.token!
                 )
+                
                 if field == "Password" {
                     auth.logout()
                 } else {
-                    await auth.fetchProfile(token: auth.token!)
+                    await refreshProfile()
                 }
             } catch {
                 print("Profile update failed: \(error)")
@@ -252,6 +251,142 @@ struct ProfileView: View {
     }
 }
 
+// MARK: - کامپوننت مجزا برای نمایش عکس پروفایل
+struct ProfileImageView: View {
+    let imageURL: String?
+    @State private var uiImage: UIImage? = nil
+    @State private var isLoading = false
+    
+    var body: some View {
+        Group {
+            if let uiImage = uiImage {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 100, height: 100)
+                    .clipShape(Circle())
+            } else if isLoading {
+                ProgressView()
+                    .frame(width: 100, height: 100)
+            } else {
+                Image(systemName: "person.crop.circle.fill")
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 100, height: 100)
+                    .foregroundColor(.gray)
+                    .clipShape(Circle())
+            }
+        }
+        .onAppear {
+            loadImage()
+        }
+        .onChange(of: imageURL) { _ in
+            loadImage()
+        }
+    }
+    
+    private func loadImage() {
+        guard let urlString = imageURL, !urlString.isEmpty,
+              let url = URL(string: urlString) else {
+            uiImage = nil
+            return
+        }
+        
+        // چک کردن کش
+        if let cachedImage = ImageCache.shared.get(forKey: urlString) {
+            print("✅ Loaded from cache: \(urlString)")
+            self.uiImage = cachedImage
+            return
+        }
+        
+        // دانلود
+        isLoading = true
+        print("📥 Downloading image: \(urlString)")
+        
+        URLSession.shared.dataTask(with: url) { data, response, error in
+            DispatchQueue.main.async {
+                self.isLoading = false
+                
+                if let error = error {
+                    print("❌ Download error: \(error)")
+                    return
+                }
+                
+                if let data = data, let image = UIImage(data: data) {
+                    print("✅ Downloaded successfully")
+                    ImageCache.shared.set(image, forKey: urlString)
+                    self.uiImage = image
+                } else {
+                    print("❌ Failed to convert data to image")
+                }
+            }
+        }.resume()
+    }
+}
+
+// MARK: - کش قوی‌تر با UserDefaults پشتیبان
+class ImageCache {
+    static let shared = ImageCache()
+    private let cache = NSCache<NSString, UIImage>()
+    private let fileManager = FileManager.default
+    private let cacheDirectory: URL
+    
+    private init() {
+        // کش رو به 50 مگابایت محدود کن
+        cache.totalCostLimit = 50 * 1024 * 1024
+        
+        // دایرکتوری کش
+        let paths = fileManager.urls(for: .cachesDirectory, in: .userDomainMask)
+        cacheDirectory = paths[0].appendingPathComponent("ProfileImages", isDirectory: true)
+        
+        // ایجاد دایرکتوری اگر وجود نداره
+        try? fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+    }
+    
+    func get(forKey key: String) -> UIImage? {
+        // اول از NSCache
+        if let image = cache.object(forKey: key as NSString) {
+            return image
+        }
+        
+        // بعد از دیسک
+        let fileName = key.replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: ":", with: "_")
+        let fileURL = cacheDirectory.appendingPathComponent(fileName)
+        
+        if fileManager.fileExists(atPath: fileURL.path),
+           let data = try? Data(contentsOf: fileURL),
+           let image = UIImage(data: data) {
+            cache.setObject(image, forKey: key as NSString)
+            return image
+        }
+        
+        return nil
+    }
+    
+    func set(_ image: UIImage, forKey key: String) {
+        // ذخیره در NSCache
+        cache.setObject(image, forKey: key as NSString)
+        
+        // ذخیره روی دیسک
+        DispatchQueue.global(qos: .background).async { [weak self] in
+            guard let self = self else { return }
+            let fileName = key.replacingOccurrences(of: "/", with: "_")
+                .replacingOccurrences(of: ":", with: "_")
+            let fileURL = self.cacheDirectory.appendingPathComponent(fileName)
+            
+            if let data = image.jpegData(compressionQuality: 0.7) {
+                try? data.write(to: fileURL)
+            }
+        }
+    }
+    
+    func clearCache() {
+        cache.removeAllObjects()
+        try? fileManager.removeItem(at: cacheDirectory)
+        try? fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+    }
+}
 
 struct LoadingOverlayView: View {
     @State private var isAnimating = false

@@ -51,22 +51,26 @@ final class AuthManager: ObservableObject {
                 token: token
             )
             
-            if let jsonString = String(data: data, encoding: .utf8) {
-            }
-            
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            // decoder.keyDecodingStrategy = .convertFromSnakeCase
             
             struct ProfileResponse: Codable {
                 let user: User
             }
             
-            let response = try decoder.decode(ProfileResponse.self, from: data)
-            self.user = response.user
-            
+            do {
+                let response = try decoder.decode(ProfileResponse.self, from: data)
+                self.user = response.user
+                print("imageURL \(response.user.imageURL ?? "nil")")
+            } catch {
+                print("decode err: \(error)")
+            }
+        
             
         } catch {
+            print("err: \(error)")
+
             if let urlError = error as? URLError, urlError.code == .userAuthenticationRequired {
                 do {
                     try await refreshTokens()
@@ -79,7 +83,6 @@ final class AuthManager: ObservableObject {
             }
         }
     }
-    
     func refreshTokens() async throws {
         guard let currentRefreshToken = self.refreshToken, !currentRefreshToken.isEmpty else {
             throw URLError(.userAuthenticationRequired)

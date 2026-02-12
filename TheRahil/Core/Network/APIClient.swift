@@ -5,7 +5,9 @@ final class APIClient {
     static let shared = APIClient()
     private init() {}
     
+    
     private let baseURL = URL(string: "http://localhost:8080")!
+//    private let baseURL = URL(string: "http://172.20.10.2:8080")!
     
     func request(
         path: String,
