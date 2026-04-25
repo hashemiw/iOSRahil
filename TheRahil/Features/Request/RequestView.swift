@@ -64,7 +64,7 @@ struct RequestsView: View {
                 }
             }
             .navigationTitle("Requests")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: { isPresentingModal = true }) {
@@ -120,6 +120,7 @@ struct RequestsView: View {
     }
 }
 
+
 struct RequestRowView: View {
     let request: Request
     
@@ -129,7 +130,6 @@ struct RequestRowView: View {
                 Circle()
                     .fill(statusColor.opacity(0.15))
                     .frame(width: 40, height: 40)
-                
                 Image(systemName: iconForType(request.type))
                     .foregroundColor(statusColor)
                     .font(.system(size: 18, weight: .semibold))
@@ -139,7 +139,6 @@ struct RequestRowView: View {
                 Text(request.type)
                     .font(.headline)
                     .foregroundColor(.primary)
-                
                 Text(request.reason)
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -167,10 +166,15 @@ struct RequestRowView: View {
     }
     
     var statusColor: Color {
-        switch request.status {
-        case "APPROVED": return .green
-        case "REJECTED": return .red
-        default: return .orange
+        switch request.status.uppercased() {
+        case "APPROVED":
+            return .green
+        case "REJECTED":
+            return .red
+        case "PENDING":
+            return .orange
+        default:
+            return .gray
         }
     }
     
@@ -191,23 +195,20 @@ struct RequestRowView: View {
     }
 }
 
-
-import SwiftUI
-
 struct NewRequestSheet: View {
     @Binding var isPresented: Bool
     let onRequestAdded: (Request) -> Void
     @EnvironmentObject var auth: AuthManager
-    
+    @Environment(\.dismiss) private var dismiss
     @State private var selectedType = "Leave"
     @State private var reason = ""
     @State private var selectedDate = Date()
     @State private var isSubmitting = false
     @State private var errorMessage: String?
     @State private var showError = false
-    
-    let types = ["Leave", "Overtime", "Holiday Work", "Promotion"]
-    
+
+    let types = ["Leave", "Overtime", "Holiday", "Promotion"]
+
     var body: some View {
         NavigationView {
             Form {
@@ -219,7 +220,7 @@ struct NewRequestSheet: View {
                     }
                     .pickerStyle(.segmented)
                 }
-                
+
                 Section(header: Text("Date")) {
                     DatePicker("Select Date",
                              selection: $selectedDate,
@@ -227,12 +228,12 @@ struct NewRequestSheet: View {
                              displayedComponents: .date)
                         .datePickerStyle(.graphical)
                 }
-                
+
                 Section(header: Text("Reason")) {
                     TextField("Enter reason...", text: $reason, axis: .vertical)
                         .lineLimit(3...6)
                 }
-                
+
                 if let error = errorMessage {
                     Section {
                         Text(error)
@@ -246,11 +247,10 @@ struct NewRequestSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
-                        isPresented = false
+                        dismiss()
                     }
                     .disabled(isSubmitting)
                 }
-                
                 ToolbarItem(placement: .confirmationAction) {
                     Button(action: submitRequest) {
                         if isSubmitting {
@@ -263,45 +263,43 @@ struct NewRequestSheet: View {
                     .disabled(reason.isEmpty || isSubmitting)
                 }
             }
-            .alert("Error", isPresented: $showError) {
-                Button("OK", role: .cancel) { }
-            } message: {
-                Text(errorMessage ?? "Unknown error occurred")
-            }
+        }
+        .alert("Error", isPresented: $showError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(errorMessage ?? "Unknown error occurred")
         }
     }
-    
+
     func submitRequest() {
         Task {
             isSubmitting = true
             errorMessage = nil
-            
+
             do {
                 guard let token = auth.token else {
                     throw NSError(domain: "Auth", code: 401,
-                                userInfo: [NSLocalizedDescriptionKey: "Not authenticated"])
+                        userInfo: [NSLocalizedDescriptionKey: "Not authenticated"])
                 }
-                
+
                 let newReq = try await APIClient.shared.createRequest(
                     token: token,
                     type: selectedType,
                     reason: reason,
                     date: selectedDate
                 )
-                
-                
+
                 await MainActor.run {
                     onRequestAdded(newReq)
-                    isPresented = false
+                    dismiss()
                 }
-                
             } catch {
                 await MainActor.run {
                     errorMessage = error.localizedDescription
                     showError = true
                 }
             }
-            
+
             await MainActor.run {
                 isSubmitting = false
             }

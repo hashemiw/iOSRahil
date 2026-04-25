@@ -9,25 +9,20 @@ struct AttendanceView: View {
         ZStack {
             Color(UIColor.systemGroupedBackground)
                 .ignoresSafeArea()
-            
             VStack(spacing: 30) {
                 Spacer()
-                
                 VStack(spacing: 20) {
                     Image(systemName: "location.circle.fill")
                         .font(.system(size: 60))
                         .foregroundColor(.blue)
                         .shadow(color: Color.blue.opacity(0.3), radius: 10)
-                    
                     Text("Mark Attendance")
                         .font(.title.bold())
-                    
                     VStack(spacing: 5) {
                         Text(statusText)
                             .font(.subheadline)
                             .fontWeight(.semibold)
                             .foregroundColor(statusColor)
-                        
                         if let time = vm.lastStatusTime {
                             Text(timeString(from: time))
                                 .font(.caption)
@@ -40,7 +35,6 @@ struct AttendanceView: View {
                     }
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
-                    
                     Button(action: {
                         Task {
                             await vm.check(type: "IN", token: auth.token!, authManager: auth)
@@ -63,7 +57,6 @@ struct AttendanceView: View {
                         .cornerRadius(12)
                     }
                     .disabled(vm.isLoading)
-                    
                     Button(action: {
                         Task {
                             await vm.check(type: "OUT", token: auth.token!, authManager: auth)
@@ -91,13 +84,19 @@ struct AttendanceView: View {
                 .background(Color(.systemBackground))
                 .cornerRadius(24)
                 .shadow(color: Color.black.opacity(0.1), radius: 20, x: 0, y: 10)
-                
                 Spacer()
             }
             .padding()
             .navigationTitle("Attendance")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    NavigationLink(destination: HistoryView().environmentObject(auth)) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .foregroundColor(.blue)
+                    }
+                }
+                
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Close") {
                         presentationMode.wrappedValue.dismiss()
@@ -116,7 +115,6 @@ struct AttendanceView: View {
             loadInitialStatus()
         }
     }
-    
     
     private func loadInitialStatus() {
         if let lastStatus = auth.user?.lastStatus {

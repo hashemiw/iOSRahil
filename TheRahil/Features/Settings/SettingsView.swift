@@ -47,14 +47,22 @@ struct SettingsView: View {
                 }
             }
             
+            // داخل SettingsView
             Section(header: Text("Security")) {
-                HStack {
-                    Image(systemName: "faceid")
-                    Text("Biometric Login")
-                    Spacer()
-                    Text("Enabled")
-                        .foregroundColor(.green)
+                NavigationLink(destination: SecuritySettingsView()) {
+                    HStack {
+                        Image(systemName: "lock.shield")
+                            .foregroundColor(.blue)
+                        Text("App Lock")
+                        Spacer()
+                        // نمایش وضعیت روشن یا خاموش
+                        if ((UserDefaults.standard.string(forKey: "local_app_passcode")?.isEmpty) == nil) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                        }
+                    }
                 }
+                // سایر آیتم‌ها...
             }
             
             Section {
@@ -126,5 +134,40 @@ struct LanguageSelectionView: View {
         }
         .navigationTitle("Select Language")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+
+
+
+import Foundation
+import SwiftUI
+
+class AppSecurityDebug {
+    
+    static let passcodeKey = "local_app_passcode"
+    
+    static func logSecurityStatus() {
+        let storedCode = UserDefaults.standard.string(forKey: passcodeKey)
+        
+        print("========================================")
+        print("🔒 APP SECURITY DEBUG LOG")
+        print("========================================")
+        
+        if let code = storedCode {
+            print("✅ Status: LOCKED (Passcode is SET)")
+            print("🔑 Stored Passcode: \(code)")
+            print("🔑 Passcode Length: \(code.count) digits")
+        } else {
+            print("⚠️ Status: UNLOCKED (No Passcode found)")
+            print("🔑 Stored Passcode: nil")
+        }
+        
+        print("========================================")
+    }
+    
+    static func resetPasscode() {
+        UserDefaults.standard.removeObject(forKey: passcodeKey)
+        print("🧹 Passcode has been RESET. App is now UNLOCKED.")
     }
 }

@@ -8,6 +8,7 @@
 import SwiftUI
 
 struct ProfileView: View {
+    
     @EnvironmentObject var auth: AuthManager
     @State private var isImagePickerPresented = false
     @State private var isEditingName = false
@@ -24,15 +25,14 @@ struct ProfileView: View {
     @State private var isLoading = false
     @State private var selectedImageData: Data? = nil
     
-    // --- حذف currentImageURL و uiImage ---
-    // مستقیماً از auth.user?.imageURL استفاده میکنیم
+    @State private var isEditingTeam = false
+    @State private var tempTeam = ""
 
     var body: some View {
         ZStack {
             List {
                 Section {
                     VStack(spacing: 0) {
-                        // نمایش عکس مستقیم از URL داخل auth.user
                         ZStack {
                             ProfileImageView(imageURL: auth.user?.imageURL)
                                 .frame(width: 100, height: 100)
@@ -69,14 +69,27 @@ struct ProfileView: View {
                     }
                     
                     Button(action: {
+                        tempTeam = auth.user?.team ?? ""
+                        isEditingTeam = true
+                    }) {
+                        HStack {
+                            Text("Team")
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text(auth.user?.team ?? "No team")
+                                .foregroundColor(.primary)
+                        }
+                    }
+                    
+                    Button(action: {
                         tempPosition = auth.user?.position ?? ""
                         isEditingPosition = true
                     }) {
                         HStack {
-                            Text("Team or Position")
+                            Text("Position")
                                 .foregroundColor(.secondary)
                             Spacer()
-                            Text(auth.user?.position ?? "No Team")
+                            Text(auth.user?.position ?? "No Position")
                                 .foregroundColor(.primary)
                         }
                     }
@@ -196,6 +209,19 @@ struct ProfileView: View {
                 SettingsView()
             }
         }
+        
+        .sheet(isPresented: $isEditingTeam) {
+            EditableSectionView(
+                title: "Change Team",
+                description: "Enter your team name (e.g., Development, Marketing, Sales).",
+                currentValue: $tempTeam,
+                isPresented: $isEditingTeam,
+                isPassword: false,
+                onDone: { newValue in
+                    self.updateProfileField(field: "Team", newValue: newValue)
+                }
+            )
+        }
     }
     
     private func refreshProfile() async {
@@ -210,21 +236,18 @@ struct ProfileView: View {
         do {
             guard let token = auth.token else { return }
             
-            print("🚀 Starting upload...")
             let returnedURL = try await APIClient.shared.uploadProfileImage(imageData: data, token: token)
-            print("✅ Upload Success. Server returned URL: \(returnedURL)")
+            print("Upload Success. Server returned URL: \(returnedURL)")
             
-            // آپدیت مستقیم user object
             if var currentUser = auth.user {
                 currentUser.imageURL = returnedURL
                 auth.user = currentUser
             }
             
-            // دریافت مجدد پروفایل برای اطمینان
             await refreshProfile()
             
         } catch {
-            print("❌ Error uploading image: \(error)")
+            print("Error uploading image: \(error)")
         }
     }
     
@@ -234,11 +257,11 @@ struct ProfileView: View {
                 try await APIClient.shared.updateProfile(
                     name: field == "Name" ? newValue : nil,
                     position: field == "Position" ? newValue : nil,
+                    team: field == "Team" ? newValue : nil,
                     email: field == "Email" ? newValue : nil,
                     password: field == "Password" ? newValue : nil,
                     token: auth.token!
                 )
-                
                 if field == "Password" {
                     auth.logout()
                 } else {
@@ -251,7 +274,6 @@ struct ProfileView: View {
     }
 }
 
-// MARK: - کامپوننت مجزا برای نمایش عکس پروفایل
 struct ProfileImageView: View {
     let imageURL: String?
     @State private var uiImage: UIImage? = nil
@@ -292,39 +314,36 @@ struct ProfileImageView: View {
             return
         }
         
-        // چک کردن کش
         if let cachedImage = ImageCache.shared.get(forKey: urlString) {
-            print("✅ Loaded from cache: \(urlString)")
+            print("Loaded from cache: \(urlString)")
             self.uiImage = cachedImage
             return
         }
         
-        // دانلود
         isLoading = true
-        print("📥 Downloading image: \(urlString)")
+        print("Downloading image: \(urlString)")
         
         URLSession.shared.dataTask(with: url) { data, response, error in
             DispatchQueue.main.async {
                 self.isLoading = false
                 
                 if let error = error {
-                    print("❌ Download error: \(error)")
+                    print("Download error: \(error)")
                     return
                 }
                 
                 if let data = data, let image = UIImage(data: data) {
-                    print("✅ Downloaded successfully")
+                    print("Downloaded successfully")
                     ImageCache.shared.set(image, forKey: urlString)
                     self.uiImage = image
                 } else {
-                    print("❌ Failed to convert data to image")
+                    print("Failed to convert data to image")
                 }
             }
         }.resume()
     }
 }
 
-// MARK: - کش قوی‌تر با UserDefaults پشتیبان
 class ImageCache {
     static let shared = ImageCache()
     private let cache = NSCache<NSString, UIImage>()
@@ -332,24 +351,19 @@ class ImageCache {
     private let cacheDirectory: URL
     
     private init() {
-        // کش رو به 50 مگابایت محدود کن
         cache.totalCostLimit = 50 * 1024 * 1024
         
-        // دایرکتوری کش
         let paths = fileManager.urls(for: .cachesDirectory, in: .userDomainMask)
         cacheDirectory = paths[0].appendingPathComponent("ProfileImages", isDirectory: true)
         
-        // ایجاد دایرکتوری اگر وجود نداره
         try? fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
     }
     
     func get(forKey key: String) -> UIImage? {
-        // اول از NSCache
         if let image = cache.object(forKey: key as NSString) {
             return image
         }
         
-        // بعد از دیسک
         let fileName = key.replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: ":", with: "_")
         let fileURL = cacheDirectory.appendingPathComponent(fileName)
@@ -365,10 +379,8 @@ class ImageCache {
     }
     
     func set(_ image: UIImage, forKey key: String) {
-        // ذخیره در NSCache
         cache.setObject(image, forKey: key as NSString)
         
-        // ذخیره روی دیسک
         DispatchQueue.global(qos: .background).async { [weak self] in
             guard let self = self else { return }
             let fileName = key.replacingOccurrences(of: "/", with: "_")

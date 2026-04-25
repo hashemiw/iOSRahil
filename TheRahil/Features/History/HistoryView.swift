@@ -7,7 +7,6 @@
 import SwiftUI
 
 struct HistoryView: View {
-    
     @StateObject private var viewModel = HistoryViewModel()
     @EnvironmentObject var auth: AuthManager
     
@@ -18,10 +17,9 @@ struct HistoryView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
             } else if viewModel.historyItems.isEmpty {
                 Text("No history found.")
-                
                     .foregroundColor(.secondary)
             } else {
-                ForEach(viewModel.historyItems) { item in
+                ForEach(viewModel.historyItems.reversed()) { item in
                     HStack(spacing: 15) {
                         ZStack {
                             Circle()
@@ -31,7 +29,6 @@ struct HistoryView: View {
                                 .foregroundColor(item.color)
                                 .font(.system(size: 18, weight: .semibold))
                         }
-                        
                         VStack(alignment: .leading, spacing: 4) {
                             Text(item.title)
                                 .font(.headline)
@@ -41,9 +38,7 @@ struct HistoryView: View {
                                 .foregroundColor(.secondary)
                                 .lineLimit(1)
                         }
-                        
                         Spacer()
-                        
                         VStack(alignment: .trailing) {
                             Text(formatTime(item.time))
                                 .font(.caption)
@@ -58,7 +53,6 @@ struct HistoryView: View {
                 }
             }
         }
-        
         .listStyle(.insetGrouped)
         .navigationTitle("History")
         .refreshable {

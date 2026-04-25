@@ -5,7 +5,7 @@ final class APIClient {
     static let shared = APIClient()
     private init() {}
     
-    
+        
     private let baseURL = URL(string: "http://localhost:8080")!
 //    private let baseURL = URL(string: "http://172.20.10.2:8080")!
     
@@ -54,6 +54,7 @@ final class APIClient {
     func updateProfile(
         name: String?,
         position: String?,
+        team: String?,
         email: String?,
         password: String?,
         token: String
@@ -61,9 +62,10 @@ final class APIClient {
         var body: [String: Any] = [:]
         if let name = name, !name.isEmpty { body["name"] = name }
         if let position = position, !position.isEmpty { body["position"] = position }
+        if let team = team, !team.isEmpty { body["team"] = team }
         if let email = email, !email.isEmpty { body["email"] = email }
         if let password = password, !password.isEmpty { body["password"] = password }
-        
+
         return try await request(
             path: "/api/profile",
             method: "PATCH",
@@ -169,6 +171,52 @@ final class APIClient {
         }
     }
     
+
+    func getMessages(token: String) async throws -> [Message] {
+        let data = try await request(path: "/api/messages", method: "GET", token: token)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        
+        let messages = try decoder.decode([Message].self, from: data)
+        return messages
+    }
+
+    func sendMessage(token: String, content: String) async throws -> Message {
+        let body: [String: Any] = ["content": content]
+        
+        let data = try await request(
+            path: "/api/messages",
+            method: "POST",
+            token: token,
+            body: body
+        )
+        
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let message = try decoder.decode(Message.self, from: data)
+        return message
+    }
+
+    func getTeams(token: String) async throws -> [String] {
+        let data = try await request(path: "/api/teams", method: "GET", token: token)
+        
+        if let teams = try? JSONDecoder().decode([String].self, from: data) {
+            return teams
+        }
+        return []
+    }
+
+
+    func getMessagesByTeam(token: String, team: String) async throws -> [Message] {
+        let encodedTeam = team.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? team
+        let data = try await request(path: "/api/admin/messages/\(encodedTeam)", method: "GET", token: token)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        
+        let messages = try decoder.decode([Message].self, from: data)
+        return messages
+    }
+    
     func getHistory(token: String) async throws -> [HistoryItem] {
         let data = try await request(path: "/api/history", method: "GET", token: token)
         
@@ -206,12 +254,186 @@ final class APIClient {
                 ))
             }
             
-            items.sort { $0.time > $1.time }
+            items.sort { $0.time < $1.time }
             return items
         } catch {
             throw error
         }
     }
+}
+
+
+
+extension APIClient {
+    
+    
+    func getProjects(token: String, team: String? = nil) async throws -> [Project] {
+        var path = "/api/projects"
+        if let team = team, !team.isEmpty {
+            path += "?team=\(team.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? team)"
+        }
+        
+        let data = try await request(path: path, method: "GET", token: token)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode([Project].self, from: data)
+    }
+    
+    func getProject(token: String, projectId: UInt) async throws -> Project {
+        let data = try await request(path: "/api/projects/\(projectId)", method: "GET", token: token)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(Project.self, from: data)
+    }
+    
+    func createProject(token: String, name: String, description: String, team: String) async throws -> Project {
+        let body: [String: Any] = [
+            "name": name,
+            "description": description,
+            "team": team
+        ]
+        let data = try await request(path: "/api/projects", method: "POST", token: token, body: body)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(Project.self, from: data)
+    }
+    
+    func updateProject(token: String, projectId: UInt, name: String?, description: String?, team: String?) async throws -> Data {
+        var body: [String: Any] = [:]
+        if let name = name { body["name"] = name }
+        if let description = description { body["description"] = description }
+        if let team = team { body["team"] = team }
+        
+        return try await request(path: "/api/projects/\(projectId)", method: "PUT", token: token, body: body)
+    }
+    
+    func deleteProject(token: String, projectId: UInt) async throws -> Data {
+        return try await request(path: "/api/projects/\(projectId)", method: "DELETE", token: token)
+    }
+    
+    
+    func getTasks(token: String, projectId: UInt) async throws -> [Tasks] {
+        let data = try await request(path: "/api/projects/\(projectId)/tasks", method: "GET", token: token)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode([Tasks].self, from: data)
+    }
+    
+    func getTask(token: String, projectId: UInt, taskId: UInt) async throws -> Tasks {
+        let data = try await request(path: "/api/projects/\(projectId)/tasks/\(taskId)", method: "GET", token: token)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(Tasks.self, from: data)
+    }
+    
+    func createTask(token: String, projectId: UInt, title: String, description: String, status: String, priority: String, assignedTo: UInt?, dueDate: Date?) async throws -> Tasks {
+        var body: [String: Any] = [
+            "title": title,
+            "description": description,
+            "status": status,
+            "priority": priority
+        ]
+        
+        if let assignedTo = assignedTo {
+            body["assigned_to"] = assignedTo
+        }
+        
+        if let dueDate = dueDate {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            body["due_date"] = formatter.string(from: dueDate)
+        }
+        
+        let data = try await request(path: "/api/projects/\(projectId)/tasks", method: "POST", token: token, body: body)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(Tasks.self, from: data)
+    }
+    
+    func updateTask(token: String, projectId: UInt, taskId: UInt, title: String?, description: String?, status: String?, priority: String?, assignedTo: UInt?, dueDate: Date?) async throws -> Tasks {
+        var body: [String: Any] = [:]
+        if let title = title { body["title"] = title }
+        if let description = description { body["description"] = description }
+        if let status = status { body["status"] = status }
+        if let priority = priority { body["priority"] = priority }
+        if let assignedTo = assignedTo { body["assigned_to"] = assignedTo }
+        if let dueDate = dueDate {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            body["due_date"] = formatter.string(from: dueDate)
+        }
+        
+        let data = try await request(path: "/api/projects/\(projectId)/tasks/\(taskId)", method: "PUT", token: token, body: body)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(Tasks.self, from: data)
+    }
+    
+    func deleteTask(token: String, projectId: UInt, taskId: UInt) async throws -> Data {
+        return try await request(path: "/api/projects/\(projectId)/tasks/\(taskId)", method: "DELETE", token: token)
+    }
+    
+    
+    func getProjectMembers(token: String, projectId: UInt) async throws -> [TaskUser] {
+        let data = try await request(path: "/api/projects/\(projectId)/members", method: "GET", token: token)
+        let decoder = JSONDecoder()
+        return try decoder.decode([TaskUser].self, from: data)
+    }
+    
+    
+    func getMyTasks(token: String) async throws -> [MyTask] {
+        print("🔵 [API] getMyTasks called")
+        
+        let data = try await request(path: "/api/my-tasks", method: "GET", token: token)
+        
+        if let jsonString = String(data: data, encoding: .utf8) {
+            print("🟢 [API] Raw Response: \(jsonString)")
+        }
+        
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        
+        do {
+            let tasks = try decoder.decode([MyTask].self, from: data)
+            print("🟢 [API] Decoded \(tasks.count) tasks")
+            return tasks
+        } catch {
+            print("🔴 [API] Decode Error: \(error)")
+            print("🔴 [API] Error localized: \(error.localizedDescription)")
+            throw error
+        }
+    }
+    
+    func getTeamsWithMessages(token: String) async throws -> [TeamData] {
+        let data = try await request(path: "/api/teams/messages", method: "GET", token: token)
+        return try JSONDecoder().decode([TeamData].self, from: data)
+    }
+
+    func sendMessage(token: String, content: String, team: String) async throws -> Message {
+        let body: [String: Any] = ["content": content, "team": team]
+        let data = try await request(path: "/api/messages", method: "POST", token: token, body: body)
+        return try JSONDecoder().decode(Message.self, from: data)
+    }
+
+    func getTeamMembers(token: String, team: String) async throws -> [User] {
+        let data = try await request(path: "/api/teams/\(team)/members", method: "GET", token: token)
+        return try JSONDecoder().decode([User].self, from: data)
+    }
+
+    func createTeam(token: String, name: String) async throws {
+        let body: [String: Any] = ["name": name]
+        _ = try await request(path: "/api/teams", method: "POST", token: token, body: body)
+    }
+
+    struct TeamData: Codable {
+        let id: String
+        let name: String
+        let memberCount: Int
+        let unreadCount: Int
+        let lastMessage: String?
+        let lastMessageTime: Date?
+    }
+    
 }
 
 struct HistoryResponse: Codable {
@@ -249,3 +471,139 @@ struct AttendanceLog: Codable {
     }
 }
 
+
+extension APIClient {
+
+    func sendFileMessage(
+        token: String,
+        fileData: Data,
+        fileName: String,
+        mimeType: String,
+        content: String,
+        team: String? = nil,
+        replyToID: UInt? = nil
+    ) async throws -> Message {
+        let url = baseURL.appendingPathComponent("/api/messages/file")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let boundary = UUID().uuidString
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        var body = Data()
+
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: \(mimeType)\r\n\r\n".data(using: .utf8)!)
+        body.append(fileData)
+        body.append("\r\n".data(using: .utf8)!)
+
+        if !content.isEmpty {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"content\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(content)\r\n".data(using: .utf8)!)
+        }
+
+        if let team = team, !team.isEmpty {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"team\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(team)\r\n".data(using: .utf8)!)
+        }
+
+        if let replyToID = replyToID {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"reply_to_id\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(replyToID)\r\n".data(using: .utf8)!)
+        }
+
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(Message.self, from: data)
+    }
+
+    func updateMessage(token: String, messageID: UInt, content: String) async throws -> Message {
+        let body: [String: Any] = ["content": content]
+        let data = try await request(
+            path: "/api/messages/\(messageID)",
+            method: "PUT",
+            token: token,
+            body: body
+        )
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(Message.self, from: data)
+    }
+
+    func deleteMessage(token: String, messageID: UInt) async throws {
+        _ = try await request(
+            path: "/api/messages/\(messageID)",
+            method: "DELETE",
+            token: token
+        )
+    }
+
+    func addReaction(token: String, messageID: UInt, emoji: String) async throws -> MessageReaction {
+        let body: [String: Any] = ["emoji": emoji]
+        let data = try await request(
+            path: "/api/messages/\(messageID)/reactions",
+            method: "POST",
+            token: token,
+            body: body
+        )
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(MessageReaction.self, from: data)
+    }
+
+    func removeReaction(token: String, messageID: UInt, emoji: String) async throws {
+        let body: [String: Any] = ["emoji": emoji]
+        _ = try await request(
+            path: "/api/messages/\(messageID)/reactions",
+            method: "DELETE",
+            token: token,
+            body: body
+        )
+    }
+
+    func getReactions(token: String, messageID: UInt) async throws -> [MessageReaction] {
+        let data = try await request(
+            path: "/api/messages/\(messageID)/reactions",
+            method: "GET",
+            token: token
+        )
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode([MessageReaction].self, from: data)
+    }
+
+    func sendMessage(token: String, content: String, team: String? = nil, replyToID: UInt? = nil) async throws -> Message {
+        var body: [String: Any] = ["content": content]
+        if let team = team { body["team"] = team }
+        if let replyToID = replyToID { body["reply_to_id"] = replyToID }
+
+        let data = try await request(
+            path: "/api/messages",
+            method: "POST",
+            token: token,
+            body: body
+        )
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(Message.self, from: data)
+    }
+}
